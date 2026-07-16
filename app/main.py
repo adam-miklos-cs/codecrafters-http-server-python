@@ -1,7 +1,7 @@
 import socket  # noqa: F401
 
 
-def extract_echo_str(target: str) -> str:
+def extract_last_path_segment(target: str) -> str:
     splitted = target.split("/")
     return splitted[-1]
 
@@ -25,13 +25,21 @@ def main():
     [method, target, version] = request_line.decode("utf-8").split(" ")
 
     if method == "GET":
-        if target.startswith("/echo/"):
-            echo_str = extract_echo_str(target)
+        if target == "/":
+            client_socket.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
+        elif target.startswith("/echo/"):
+            echo_str = extract_last_path_segment(target)
             response_text = f"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {len(echo_str)}\r\n\r\n{echo_str}"
             response = response_text.encode("utf-8")
             client_socket.sendall(response)
-        elif target == "/":
-            client_socket.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
+        elif target.startswith("/user-agent"):
+            for header in headers:
+                if header.lower().startswith(b"user-agent:"):
+                    user_agent = header.decode("utf-8").split(":", 1)[1].strip()
+                    response_text = f"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {len(user_agent)}\r\n\r\n{user_agent}"
+                    response = response_text.encode("utf-8")
+                    client_socket.sendall(response)
+                    break
         else:
             client_socket.sendall(b"HTTP/1.1 404 Not Found\r\n\r\n")
 
