@@ -35,7 +35,6 @@ class HTTPResponse:
     body: bytes = b""
 
     def to_bytes(self) -> bytes:
-        # Smart Serializer: Automatically sets Content-Length right before sending
         self.headers["Content-Length"] = str(len(self.body))
 
         lines = [f"{self.version} {self.status_code} {self.status_text}"]
@@ -65,7 +64,6 @@ def handle_get(req: HTTPRequest, config: ServerConfig) -> HTTPResponse:
         )
 
     if req.target == "/user-agent":
-        # Direct lookup because parse_headers already normalized keys to lowercase!
         user_agent = req.headers.get("user-agent", "")
         return HTTPResponse(
             status_code=200,
@@ -129,6 +127,9 @@ def build_response(req: HTTPRequest, config: ServerConfig) -> HTTPResponse:
         response.body = gzip.compress(response.body)
         response.headers["Content-Encoding"] = "gzip"
 
+    if req.headers.get("connection", "") == "close":
+        response.headers["Connection"] = "close"
+
     return response
 
 
@@ -168,23 +169,28 @@ def parse_request(raw_request_bytes: bytes) -> HTTPRequest:
 
 def handle_request(client_socket: socket.socket, config: ServerConfig):
     try:
-        # Using 4096 to safely fit larger headers or small POST bodies in one read
         DATA_LENGTH = 4096
-        raw_request_bytes = client_socket.recv(DATA_LENGTH)
 
-        if not raw_request_bytes:
-            return
+        while True:
+            raw_request_bytes = client_socket.recv(DATA_LENGTH)
 
-        # 1. Parse raw bytes into our read-only HTTPRequest struct
-        request_obj = parse_request(raw_request_bytes)
+            if not raw_request_bytes:
+                break
 
-        # 2. Build and decorate the response struct
-        response_obj = build_response(request_obj, config)
+            # 1. Parse raw bytes into HTTPRequest struct
+            request_obj = parse_request(raw_request_bytes)
 
-        # 3. Serialize to wire format (to_bytes automatically sets Content-Length)
-        client_socket.sendall(response_obj.to_bytes())
+            # 2. Build and decorate the response struct
+            response_obj = build_response(request_obj, config)
+
+            # 3. Serialize to wire format and send
+            client_socket.sendall(response_obj.to_bytes())
+
+            # 4. Check if the client requested connection closure
+            if request_obj.headers.get("connection", "") == "close":
+                break
+
     except Exception as e:
-        # Defensive catch: return a 500 Internal Server Error instead of crashing the thread
         error_res = HTTPResponse(status_code=500, status_text="Internal Server Error")
         client_socket.sendall(error_res.to_bytes())
     finally:
